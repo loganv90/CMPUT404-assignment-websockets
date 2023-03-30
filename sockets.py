@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # coding: utf-8
-# Copyright (c) 2013-2014 Abram Hindle
+# Copyright (c) 2023 Abram Hindle, Logan Vaughan
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,7 +14,8 @@
 # limitations under the License.
 #
 import flask
-from flask import Flask, request
+from flask import Flask, request, redirect
+from flask_cors import CORS
 from flask_sockets import Sockets
 import gevent
 from gevent import queue
@@ -25,6 +26,8 @@ import os
 app = Flask(__name__)
 sockets = Sockets(app)
 app.debug = True
+CORS(app)
+web_sockets = []
 
 class World:
     def __init__(self):
@@ -69,11 +72,26 @@ myWorld.add_set_listener( set_listener )
 @app.route('/')
 def hello():
     '''Return something coherent here.. perhaps redirect to /static/index.html '''
-    return None
+    return redirect('/static/index.html')
 
-def read_ws(ws,client):
+def read_ws(ws):
     '''A greenlet function that reads from the websocket and updates the world'''
     # XXX: TODO IMPLEMENT ME
+
+    data = ws.receive()
+
+    if data is None:
+        return None
+    
+    json_data = json.loads(data)
+
+    for key, value in json_data.items():
+        myWorld.set(key, value)
+        packet = { key : value }
+
+        for web_socket in web_sockets:
+            web_socket.send(json.dumps(packet))
+
     return None
 
 @sockets.route('/subscribe')
@@ -81,8 +99,17 @@ def subscribe_socket(ws):
     '''Fufill the websocket URL of /subscribe, every update notify the
        websocket and read updates from the websocket '''
     # XXX: TODO IMPLEMENT ME
-    return None
 
+    ws.send(json.dumps(myWorld.world()))
+
+    web_sockets.append(ws)
+
+    while not ws.closed:
+        read_ws(ws)
+    
+    web_sockets.remove(ws)
+
+    return None
 
 # I give this to you, this is how you get the raw body/data portion of a post in flask
 # this should come with flask but whatever, it's not my project.
